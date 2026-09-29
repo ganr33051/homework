@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>과제 마감 지킴이</title>
+<meta name="description" content="마감일을 자꾸 놓치는 대학생을 위한 과제 D-day 관리 앱">
+<!--
+  AI 웹앱 개발 히어로 아카데미 · 3주차 연습용 예시 앱
+  ─────────────────────────────────────────────
+  Gemini Canvas가 만들어 주는 결과물과 같은 형태(HTML 파일 하나)입니다.
+  내 앱이 아직 없어도 이 파일로 GitHub Pages 배포를 끝까지 연습할 수 있습니다.
+
+  이 파일 안에는 세 가지가 함께 들어 있습니다.
+    <style>  … CSS        = 옷 (색, 크기, 배치)
+    <body>   … HTML       = 뼈대 (제목, 입력칸, 버튼)
+    <script> … JavaScript = 동작 (추가, 체크, 삭제, D-day 계산)
+
+  저장: 입력한 과제는 '이 브라우저'에만 기억됩니다(localStorage).
+       친구 폰에서는 보이지 않습니다. 모두가 함께 보는 저장은 4주차(Google Sheets)입니다.
+-->
+<style>
+  :root{
+    --bg:#f4f6f5; --card:#ffffff; --ink:#1d2320; --sub:#66706b; --line:#e3e8e5;
+    --main:#2f8a57; --main-soft:#e6f3eb; --warn:#c9632e; --warn-soft:#fbeee6;
+    --danger:#c43c4c; --danger-soft:#fbe9ec; --radius:14px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{font-family:"Pretendard","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.5; word-break:keep-all; padding:28px 16px 40px}
+  .wrap{max-width:640px; margin:0 auto}
+  header{display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:18px}
+  h1{font-size:26px; letter-spacing:-.5px}
+  h1 span{color:var(--main)}
+  .today{font-size:14px; color:var(--sub); white-space:nowrap}
+  .panel{background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:16px;
+    box-shadow:0 4px 14px rgba(20,40,30,.06)}
+  form{display:grid; grid-template-columns:1fr 1.6fr 1fr auto; gap:8px}
+  input, select{width:100%; border:1px solid var(--line); border-radius:10px; padding:10px 12px;
+    font:inherit; font-size:15px; background:#fbfcfb}
+  input:focus, select:focus{outline:2px solid var(--main); outline-offset:1px}
+  button{font:inherit; cursor:pointer; border:none; border-radius:10px}
+  .add{background:var(--main); color:#fff; font-weight:700; padding:10px 18px}
+  .add:hover{filter:brightness(1.08)}
+  .tabs{display:flex; gap:6px; margin:18px 0 10px}
+  .tabs button{background:transparent; border:1px solid var(--line); color:var(--sub); padding:7px 14px; font-size:14px}
+  .tabs button.on{background:var(--ink); border-color:var(--ink); color:#fff}
+  .count{margin-left:auto; align-self:center; font-size:14px; color:var(--sub)}
+  ul{list-style:none; display:flex; flex-direction:column; gap:8px}
+  li{display:flex; align-items:center; gap:12px; background:var(--card); border:1px solid var(--line);
+    border-radius:var(--radius); padding:12px 14px}
+  li.done{opacity:.55}
+  li.done .title{text-decoration:line-through}
+  .check{width:22px; height:22px; flex:none; accent-color:var(--main)}
+  .info{flex:1; min-width:0}
+  .subject{font-size:12.5px; color:var(--sub)}
+  .title{font-size:16px; font-weight:600}
+  .dday{flex:none; font-size:13px; font-weight:700; padding:4px 10px; border-radius:99px;
+    background:var(--main-soft); color:var(--main)}
+  .dday.soon{background:var(--warn-soft); color:var(--warn)}
+  .dday.over{background:var(--danger-soft); color:var(--danger)}
+  .del{flex:none; background:none; color:#a3aca7; font-size:20px; line-height:1; padding:4px 6px}
+  .del:hover{color:var(--danger)}
+  .empty{text-align:center; color:var(--sub); padding:30px 0}
+  .note{margin-top:18px; font-size:13px; color:var(--sub); background:#eef1ef; border-radius:10px; padding:10px 12px}
+  @media (max-width:560px){
+    form{grid-template-columns:1fr 1fr}
+    form .t{grid-column:1 / -1}
+    .add{grid-column:1 / -1}
+    h1{font-size:22px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>과제 마감 <span>지킴이</span></h1>
+    <div class="today" id="today"></div>
+  </header>
+
+  <div class="panel">
+    <form id="form">
+      <select id="subject" aria-label="과목">
+        <option>전공</option><option>교양</option><option>조별과제</option><option>기타</option>
+      </select>
+      <input class="t" id="title" placeholder="과제 이름 (예: 3장 요약 보고서)" aria-label="과제 이름" required>
+      <input id="due" type="date" aria-label="마감일" required>
+      <button class="add" type="submit">추가</button>
+    </form>
+  </div>
+
+  <div class="tabs">
+    <button type="button" data-f="all" class="on">전체</button>
+    <button type="button" data-f="todo">남은 과제</button>
+    <button type="button" data-f="done">끝낸 과제</button>
+    <span class="count" id="count"></span>
+  </div>
+
+  <ul id="list"></ul>
+
+  <p class="note">입력한 과제는 <b>이 기기의 이 브라우저에만</b> 저장됩니다. 친구 폰에서는 보이지 않아요.
+    모두가 함께 보는 저장은 4주차에 Google Sheets로 만듭니다.</p>
+</div>
+
+<script>
+  const KEY = "deadline-keeper";
+  let tasks = load();
+  let filter = "all";
+
+  // 처음 열었을 때 보여 줄 예시 과제
+  if (tasks.length === 0) {
+    tasks = [
+      { id: 1, subject: "전공", title: "3장 요약 보고서", due: shift(2), done: false },
+      { id: 2, subject: "조별과제", title: "발표 자료 역할 나누기", due: shift(6), done: false },
+      { id: 3, subject: "교양", title: "독서 감상문 제출", due: shift(-1), done: true },
+    ];
+  }
+
+  function shift(days) {
+    const d = new Date(); d.setDate(d.getDate() + days);
+    const p = n => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());   // 한국 시간 기준 날짜
+  }
+  function load() {
+    try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; }
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(tasks)); } catch (e) {}
+  }
+  function daysLeft(due) {
+    const a = new Date(); a.setHours(0, 0, 0, 0);
+    const b = new Date(due + "T00:00:00");
+    return Math.round((b - a) / 86400000);
+  }
+  function ddayLabel(n) {
+    if (n === 0) return "D-DAY";
+    return n > 0 ? "D-" + n : "D+" + (-n);
+  }
+
+  function render() {
+    const list = document.getElementById("list");
+    list.innerHTML = "";
+    const shown = tasks
+      .filter(t => filter === "all" || (filter === "done" ? t.done : !t.done))
+      .sort((a, b) => a.done - b.done || a.due.localeCompare(b.due));
+
+    if (shown.length === 0) {
+      list.innerHTML = '<li class="empty">여기에 표시할 과제가 없습니다.</li>';
+    }
+    shown.forEach(t => {
+      const n = daysLeft(t.due);
+      const li = document.createElement("li");
+      if (t.done) li.className = "done";
+      li.innerHTML =
+        '<input type="checkbox" class="check" aria-label="끝냄 표시">' +
+        '<div class="info"><div class="subject"></div><div class="title"></div></div>' +
+        '<span class="dday"></span>' +
+        '<button type="button" class="del" aria-label="삭제">×</button>';
+      li.querySelector(".subject").textContent = t.subject + " · " + t.due.replaceAll("-", ".");
+      li.querySelector(".title").textContent = t.title;
+      const badge = li.querySelector(".dday");
+      badge.textContent = t.done ? "끝" : ddayLabel(n);
+      if (!t.done && n < 0) badge.classList.add("over");
+      else if (!t.done && n <= 3) badge.classList.add("soon");
+      const box = li.querySelector(".check");
+      box.checked = t.done;
+      box.onchange = () => { t.done = box.checked; save(); render(); };
+      li.querySelector(".del").onclick = () => {
+        tasks = tasks.filter(x => x.id !== t.id); save(); render();
+      };
+      list.appendChild(li);
+    });
+    const left = tasks.filter(t => !t.done).length;
+    document.getElementById("count").textContent = "남은 과제 " + left + "개";
+  }
+
+  document.getElementById("form").onsubmit = e => {
+    e.preventDefault();
+    const title = document.getElementById("title").value.trim();
+    const due = document.getElementById("due").value;
+    if (!title || !due) return;
+    tasks.push({ id: Date.now(), subject: document.getElementById("subject").value, title, due, done: false });
+    save(); render();
+    e.target.reset();
+  };
+
+  document.querySelectorAll(".tabs button").forEach(b => {
+    b.onclick = () => {
+      filter = b.dataset.f;
+      document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+      render();
+    };
+  });
+
+  const w = ["일", "월", "화", "수", "목", "금", "토"];
+  const now = new Date();
+  document.getElementById("today").textContent =
+    now.getFullYear() + ". " + (now.getMonth() + 1) + ". " + now.getDate() + ". (" + w[now.getDay()] + ")";
+  document.getElementById("due").value = shift(7);
+  render();
+</script>
+</body>
+</html>
